@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-if command -v pytest >/dev/null 2>&1; then
-  pytest --cov=trpc_service --cov-report=term-missing
+if command -v uv >/dev/null 2>&1; then
+  uv run pytest --cov=trpc_service --cov-report=term-missing
 else
-  echo "pytest is not installed; install pytest pytest-cov for the Week 4 gate"
+  python3 -m pytest --cov=trpc_service --cov-report=term-missing
 fi

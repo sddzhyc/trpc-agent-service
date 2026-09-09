@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-if command -v flake8 >/dev/null 2>&1; then
-  flake8 trpc_service
+if command -v uv >/dev/null 2>&1; then
+  uv run ruff check trpc_service tests
 else
-  echo "flake8 is not installed; install it for the CI lint gate"
+  python3 -m ruff check trpc_service tests
 fi

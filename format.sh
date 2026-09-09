@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-if command -v ruff >/dev/null 2>&1; then
-  ruff format trpc_service
+if command -v uv >/dev/null 2>&1; then
+  uv run ruff format trpc_service tests
 else
-  echo "ruff is not installed; formatting is a Week 4 CI step"
+  python3 -m ruff format trpc_service tests
 fi
