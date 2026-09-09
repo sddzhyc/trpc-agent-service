@@ -66,6 +66,7 @@ class ChannelAdapter(ABC):
             for index, part in enumerate(parts, 1)
         ]
 
-    def send(self, message: OutboundMessage) -> dict[str, Any]:
+    async def send(self, message: OutboundMessage, binding: ChannelBinding | None = None) -> dict[str, Any]:
         """Return a delivery record; production replaces this with an SDK call."""
+        _ = binding
         return {"ok": True, "channel": self.name, "message_id": message.in_reply_to, "part": message.part}

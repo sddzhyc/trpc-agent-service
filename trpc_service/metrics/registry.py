@@ -5,11 +5,11 @@ from __future__ import annotations
 import time
 import uuid
 from collections import Counter
+from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Iterator
-
+from typing import Self
 
 _trace_id: ContextVar[str] = ContextVar("trace_id", default="")
 
@@ -23,7 +23,7 @@ class TraceContext:
     trace_id: str
     _token: object | None = None
 
-    def __enter__(self) -> "TraceContext":
+    def __enter__(self) -> Self:
         self._token = _trace_id.set(self.trace_id)
         return self
 
@@ -33,6 +33,14 @@ class TraceContext:
 
 
 def new_trace_id() -> str:
+    try:
+        from opentelemetry import trace
+
+        context = trace.get_current_span().get_span_context()
+        if context.is_valid:
+            return format(context.trace_id, "032x")
+    except (ImportError, RuntimeError):
+        pass
     return uuid.uuid4().hex
 
 

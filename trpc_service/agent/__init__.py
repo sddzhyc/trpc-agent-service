@@ -1,3 +1,4 @@
-from .runner import AgentService, EchoExecutor, TRPCAgentExecutor
+from .model import FailoverModel
+from .runner import AgentService, EchoExecutor, TenantExecutorRouter, TRPCAgentExecutor
 
-__all__ = ["AgentService", "EchoExecutor", "TRPCAgentExecutor"]
+__all__ = ["AgentService", "EchoExecutor", "FailoverModel", "TRPCAgentExecutor", "TenantExecutorRouter"]

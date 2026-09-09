@@ -5,16 +5,18 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 
 from .channels import make_session_id
-from .config import ServiceSettings
+from .config import ServiceSettings, load_environment
+from .log import configure_logging
 from .metrics import new_trace_id
 from .tenant import InboundMessage
 from .web import build_demo_runtime, create_app
 
 
 async def demo() -> None:
-    runtime = build_demo_runtime(ServiceSettings())
+    runtime = build_demo_runtime(ServiceSettings(), local_demo=True)
     message = InboundMessage(
         tenant_id="acme",
         channel="telegram",
@@ -32,12 +34,31 @@ async def demo() -> None:
     print(json.dumps([item.__dict__ for item in runtime.service.dispatcher.deliveries], ensure_ascii=False, indent=2))
 
 
+async def migrate() -> None:
+    settings = ServiceSettings.from_env()
+    migration_url = settings.migration_database_url or settings.database_url
+    if not migration_url:
+        raise SystemExit("migrate requires TRPC_SERVICE_MIGRATION_DATABASE_URL")
+    from .storage import PostgresRepository
+
+    repository = PostgresRepository.from_dsn(migration_url)
+    try:
+        await repository.migrate()
+    finally:
+        await repository.close()
+
+
 def main() -> None:
+    load_environment()
+    configure_logging(os.getenv("TRPC_SERVICE_LOG_LEVEL", "INFO"))
     parser = argparse.ArgumentParser(description="tRPC-Agent multi-tenant service")
-    parser.add_argument("command", choices=("demo", "serve"), nargs="?", default="demo")
+    parser.add_argument("command", choices=("demo", "serve", "migrate"), nargs="?", default="demo")
     args = parser.parse_args()
     if args.command == "demo":
         asyncio.run(demo())
+        return
+    if args.command == "migrate":
+        asyncio.run(migrate())
         return
     try:
         import uvicorn

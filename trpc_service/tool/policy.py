@@ -23,10 +23,17 @@ class TenantPolicyFilter:
             return PolicyDecision(False, "input_too_large")
         return PolicyDecision(True, "ok")
 
-    def check_user(self, user_id: str) -> PolicyDecision:
-        bindings = self.config.channels.values()
-        restricted = [binding for binding in bindings if binding.allowed_users]
-        if restricted and not any(user_id in binding.allowed_users for binding in restricted):
+    def check_user(self, user_id: str, channel: str | None = None, account_id: str | None = None) -> PolicyDecision:
+        if channel is not None:
+            binding = self.config.channels.get(channel)
+            if binding is None or (account_id is not None and binding.account_id != account_id):
+                return PolicyDecision(False, "binding_not_allowed")
+            restricted = binding.allowed_users
+        else:
+            restricted = frozenset().union(
+                *(binding.allowed_users for binding in self.config.channels.values() if binding.allowed_users)
+            )
+        if restricted and user_id not in restricted:
             return PolicyDecision(False, "user_not_allowed")
         return PolicyDecision(True, "ok")
 
