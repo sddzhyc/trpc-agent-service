@@ -2,7 +2,11 @@
 
 ## 统一契约
 
-每种通道实现 `verify(binding, headers, body)`、`parse(...)`、`to_outbound(...)` 和 `send(...)`。Adapter 输出统一 `InboundMessage`：`tenant_id/channel/account_id/external_message_id/external_user_id/chat_id/chat_type/text/session_id/trace_id`。平台限制只在 Adapter 内处理，Worker 不感知 XML、Update 或卡片协议。
+每种通道实现 `verify(binding, headers, body)`、`parse(...)`、`to_outbound(...)` 和 `send(...)`。Adapter 输出统一 `InboundMessage`：`tenant_id/channel/account_id/external_message_id/external_user_id/chat_id/chat_type/text/session_id/trace_id`。平台限制只在 Adapter 内处理，Worker 不感知 XML、Update 或卡片协议。飞书的完整接入步骤见 [feishu-setup.md](feishu-setup.md)。
+
+## 飞书
+
+飞书 Adapter 支持 URL challenge、Verification Token、Encrypt Key 签名与 AES 解密、`im.message.receive_v1` 文本事件、App ID 校验、bot 消息过滤、App Secret 换取/缓存 tenant access token，以及 Open API 原消息回复。回复失败时会区分 token 失效、限流、服务端错误和不可重试错误；token 失效后刷新并重试一次。
 
 ## 企业微信与 Telegram 差异
 
@@ -14,7 +18,7 @@
 | 回复 | 文本/流式或分段，按 UTF-8 字节限制 | sendMessage/editMessageText，按字符限制 |
 | 超时 | 回调快速 ACK，异步发送 | webhook 快速 ACK，API 退避重试 |
 
-当前代码提供 JSON/基础 XML 解析、签名校验和安全分段；第 4 周补齐企业微信加密 AES、Telegram OpenAPI、图片/文件下载和卡片回执。
+当前代码提供完整的 JSON/XML 解析、签名校验、企业微信 EncodingAESKey 解密与应用消息发送、Telegram Bot API 文本/图片/文件发送和 429/5xx 退避、飞书文本/图片/文件/卡片/撤回/主动消息及官方 SDK 长连接。
 
 ## Session 与身份隔离
 

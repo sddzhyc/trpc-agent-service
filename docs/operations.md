@@ -19,7 +19,7 @@
 ## 部署分层
 
 - 最小可运行：一个 FastAPI Gateway + 一个 Worker + InMemory（本仓库 `python -m trpc_service._cli demo`），用于离线演示。
-- 联调 Compose：Gateway/Worker、Redis、PostgreSQL、OTel Collector，真实模型和 IM 通过环境变量注入。
+- 联调 Compose：Gateway/Worker/Admin、Redis、PostgreSQL、Prometheus、OTel Collector，真实模型和 IM 通过环境变量注入。Collector 的默认 `debug` exporter 只用于联调，生产应替换为 Tempo/Jaeger 等持久 Trace 后端。
 - 生产 Kubernetes：Gateway/Worker/Admin 独立 Deployment/HPA，Redis/PostgreSQL HA，Vector/Object Storage、PDB、NetworkPolicy、Secret/KMS、Prometheus/OTel；队列恢复和投影任务独立扩容。
 
 发布按租户 HMAC bucket 灰度；观察错误率、队列 lag、成本和 IM 投递指标，越阈值自动停止并将 active revision 回滚。
