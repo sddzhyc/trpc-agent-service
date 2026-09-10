@@ -30,3 +30,4 @@ pyrightconfig.json
 # spec-workflow tool artifacts
 .spec-workflow
 docs/reference-analysis.md
+tmp/

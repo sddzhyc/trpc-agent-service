@@ -8,7 +8,7 @@ from secrets import randbits
 from typing import Any
 
 from opentelemetry import trace
-from opentelemetry.trace import NonRecordingSpan, SpanContext, TraceFlags, TraceState
+from opentelemetry.trace import NonRecordingSpan, SpanContext, StatusCode, TraceFlags, TraceState
 
 from .privacy import sanitize_attributes, tenant_label
 
@@ -41,9 +41,12 @@ def span(name: str, *, tenant_id: str | None = None, **attributes: object) -> It
         name,
         context=parent,
         attributes=values,
+        record_exception=False,
+        set_status_on_exception=False,
     ) as current:
         try:
             yield current
         except BaseException as exc:
             current.set_attribute("error.type", type(exc).__name__)
+            current.set_status(StatusCode.ERROR)
             raise

@@ -10,6 +10,7 @@ from dataclasses import replace
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, Response
+from opentelemetry import trace
 
 from ..agent import AgentService, EchoExecutor
 from ..agent.factory import create_executor_router_from_env
@@ -164,7 +165,11 @@ class ServiceRuntime:
             valid_trace_id = len(candidate_trace_id) == 32 and int(candidate_trace_id, 16) != 0
         except ValueError:
             valid_trace_id = False
-        trace_id = candidate_trace_id if valid_trace_id else new_trace_id()
+        current_span = trace.get_current_span().get_span_context()
+        trace_id = (
+            f"{current_span.trace_id:032x}" if current_span.is_valid
+            else candidate_trace_id if valid_trace_id else new_trace_id()
+        )
         body = raw_body if raw_body is not None else json.dumps(payload, ensure_ascii=False).encode()
         if isinstance(adapter, FeishuAdapter):
             callback = adapter.handle_callback(tenant_id, binding, headers, body, trace_id)

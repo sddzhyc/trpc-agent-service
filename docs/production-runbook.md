@@ -66,7 +66,7 @@ curl -X POST -H "X-Admin-Token: $OPERATOR_TOKEN" \
 ```bash
 curl -H "X-Admin-Token: $VIEWER_TOKEN" http://admin/admin/inbox/acme/failed
 curl -X POST -H "X-Admin-Token: $OPERATOR_TOKEN" \
-  http://admin/admin/inbox/acme/acme%3Atelegram%3Abot%3Amessage-id/replay
+  http://admin/admin/inbox/acme/acme%3Awecom%3Abot%3Amessage-id/replay
 ```
 
 `delivery_failed` 会保留已生成回复，重放只重试 IM；`failed` 会重新执行 turn，因此操作前必须确认外部副作用工具已经过账。Outbox relay 每 30 秒扫描长时间处于 `accepted/queued` 的 Inbox，以恢复 Redis 通知丢失。

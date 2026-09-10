@@ -16,8 +16,8 @@ __all__ = [
     "FeishuVerificationError",
     "TelegramAdapter",
     "WeComAdapter",
-    "WeComVerificationError",
     "WeComLongConnection",
+    "WeComVerificationError",
     "make_session_id",
     "split_text",
 ]

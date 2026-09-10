@@ -259,7 +259,7 @@ class AgentService:
             record_inbound(message.tenant_id, message.channel, "duplicate")
             return False
         try:
-            with span("queue.publish", tenant_id=message.tenant_id, channel=message.channel):
+            with span("queue.publish", tenant_id=message.tenant_id, channel=message.channel, trace_id=message.trace_id):
                 await self.queue.put(message)
         except asyncio.QueueFull:
             await self.idempotency.release(key)
@@ -284,7 +284,10 @@ class AgentService:
         if delivery is None:
             return []
         try:
-            with span("queue.consume", tenant_id=delivery.message.tenant_id, attempts=delivery.attempts):
+            with span(
+                "queue.consume", tenant_id=delivery.message.tenant_id,
+                attempts=delivery.attempts, trace_id=delivery.message.trace_id,
+            ):
                 result = await self.process(delivery.message)
         except Exception as exc:
             await self.queue.fail(delivery, type(exc).__name__, self.max_delivery_attempts)
@@ -299,7 +302,7 @@ class AgentService:
 
     async def process(self, message: InboundMessage) -> list[object]:
         start = time.perf_counter()
-        with TraceContext(message.trace_id):
+        with TraceContext(message.trace_id), span("agent.turn", tenant_id=message.tenant_id, trace_id=message.trace_id):
             key = self.idempotency_key(message)
             previous = await self.idempotency.result(key)
             if isinstance(previous, dict) and previous.get("status") == "completed":
@@ -373,10 +376,12 @@ class AgentService:
                         await audits.write(self._audit(message, "allow", "recovered", start, 2))
                         await self.idempotency.complete(key, {"status": "completed", "text": reply})
                         return deliveries
-                snapshot = await sessions.get_or_create(
-                    message.tenant_id, message.session_id, message.app_id, message.external_user_id
-                )
-                memory = await memories.list(message.tenant_id, message.external_user_id)
+                with span("session.read", tenant_id=message.tenant_id, trace_id=message.trace_id):
+                    snapshot = await sessions.get_or_create(
+                        message.tenant_id, message.session_id, message.app_id, message.external_user_id
+                    )
+                with span("memory.read", tenant_id=message.tenant_id, trace_id=message.trace_id):
+                    memory = await memories.list(message.tenant_id, message.external_user_id)
                 app = config.apps.get(message.app_id) or next(iter(config.apps.values()))
                 if self.knowledge_retriever is not None and app.knowledge_collections:
                     knowledge = await self.knowledge_retriever.recall(
@@ -526,7 +531,10 @@ class AgentService:
                 name=f"queue-heartbeat:{delivery.delivery_id}",
             )
             try:
-                with span("queue.consume", tenant_id=delivery.message.tenant_id, attempts=delivery.attempts):
+                with span(
+                    "queue.consume", tenant_id=delivery.message.tenant_id,
+                    attempts=delivery.attempts, trace_id=delivery.message.trace_id,
+                ):
                     await self.process(delivery.message)
             except asyncio.CancelledError:
                 raise

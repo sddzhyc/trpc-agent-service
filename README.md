@@ -1,15 +1,15 @@
 # 基于 tRPC-Agent-Python 的多租户节点化 Agent 服务
 
-本仓库是四周交付方案的完整代码基线。它把 tRPC-Agent-Python 的 Agent 编排能力包装成可服务多个企业租户的 Gateway/Worker 平台，支持企业微信、Telegram、飞书、租户级主备模型配置、Session/Memory 隔离、工具治理、审计、观测和后端可替换。默认 InMemory 模式用于本地演示；生产使用 PostgreSQL + Redis，并按 Gateway、Worker、Admin、Migration 四类角色部署。
+本项目将 tRPC-Agent-Python 的编排能力封装为服务多个企业租户的 Gateway/Worker 平台，提供企业微信与飞书接入、租户级主备模型配置、Session/Memory 管理、工具治理、审计和可观测性。数据后端可以按租户选择。默认 InMemory 模式用于本地演示，生产环境使用 PostgreSQL 与 Redis，并按 Gateway、Worker、Admin、Migration 四类角色部署。
 
 ## 1. 上游能力与复用边界
 
-tRPC-Agent-Python 当前 README 提供：`LlmAgent` 与 `Runner`、Chain/Parallel/Cycle/Graph/Team 编排、FunctionTool/MCP、Skills、Session（InMemory/Redis/SQL）、Memory、Knowledge、Filter、FastAPI 服务化和 OpenTelemetry。平台直接复用这些能力，新增租户控制面、Channel Adapter、路由/幂等、Storage Router、治理策略、审计和部署层。`trpc_service/agent/runner.py` 的 `TRPCAgentExecutor` 是 Runner 适配点。
+本项目实际复用 `LlmAgent`、`Runner`、`OpenAIModel`、FunctionTool/MCP、Content/Part 和 InMemory/Redis SessionService。租户控制面、Channel Adapter、路由与幂等、Storage Router、治理 Filter、Memory/Knowledge、审计与 OTel 接入由平台实现。详细边界见 [架构设计](docs/architecture.md#11-框架复用与后续扩展)。
 
 
 ## 2. 快速运行
 
-运行环境：Python 3.10+。项目依赖包含 `fastapi`、`uvicorn`、`cryptography` 和 `trpc-agent-py`；推荐使用 `uv sync` 安装完整环境。
+运行环境为 Python 3.10+，主要依赖包括 `fastapi`、`uvicorn`、`cryptography` 和 `trpc-agent-py`。使用 `uv sync` 安装完整环境后，可以运行离线演示或启动服务。
 
 ```bash
 uv run trpc-service demo
@@ -18,16 +18,7 @@ python -m trpc_service._cli serve
 
 服务地址：`GET /health/live`、`GET /health/ready`、`POST /webhook/{tenant_id}/{channel}`、`GET /admin/tenants`。开发租户为 `acme`、`globex`，配置位于 `trpc_service/web/app.py`，生产环境应通过 Admin API/SQL 和 SecretRef 管理，不能使用示例 token。
 
-Telegram JSON 示例（开发 binding）：
-
-```bash
-curl -X POST http://127.0.0.1:8080/webhook/acme/telegram \
-  -H 'Content-Type: application/json' \
-  -H 'X-Telegram-Bot-Api-Secret-Token: acme-telegram-secret' \
-  -d '{"account_id":"acme-telegram","update_id":1,"message":{"message_id":7,"from":{"id":42},"chat":{"id":42,"type":"private"},"text":"你好"}}'
-```
-
-企业微信支持普通/加密 XML 回调、EncodingAESKey 解密、URL 校验、应用消息发送和临时素材下载；Telegram 支持 Bot API 文本/图片/文件发送、媒体下载及 429/5xx 重试。
+企业微信应用模式支持普通或加密 XML 回调、URL 校验、应用消息发送和临时素材下载。接入前需配置租户 binding 的 Token、EncodingAESKey 和应用凭据，详细流程见 [企业微信接入](docs/im-channels.md#2-企业微信接入)。
 
 企业微信智能机器人长连接使用 `Bot ID + Secret`，无需公网回调地址。将凭证写入 `.env`：
 
@@ -41,17 +32,30 @@ TRPC_SERVICE_IM_DRY_RUN=false
 
 然后运行 `uv sync`、`uv run trpc-service serve`。通过 `GET /health/ready` 查看
 `wecom_connections` 状态。长连接不使用 `/webhook/{tenant_id}/wecom`，该接口保留给旧的 Corp 应用回调模式。
-当前 Bot 长连接要求 `TRPC_SERVICE_ROLE=all`，因为同一机器人只能保持一条有效 WebSocket，
-接收消息和发送 Agent 回复必须由同一进程完成。
+当前 Bot 长连接要求 `TRPC_SERVICE_ROLE=all`，因为回复依赖接收进程保存的 SDK 连接与消息上下文。该模式不能直接拆分为独立 Gateway 和 Worker。
 
-飞书通道支持 HTTP Webhook 和官方 SDK 长连接。长连接只需 App ID/App Secret 且无需公网域名；两种模式均通过 Open API 回复。完整配置见 [docs/feishu-setup.md](docs/feishu-setup.md)。
+飞书通道支持 HTTP Webhook 和官方 SDK 长连接。长连接使用 App ID/App Secret，不需要公网回调地址，两种模式均通过 Open API 回复。完整配置见 [飞书接入指南](docs/feishu-setup.md)。
 
 ## 3. 设计交付物
+
+以下七项均有对应的设计说明和代码依据。[架构文档](docs/architecture.md) 提供可独立阅读的整体方案，[完整检查清单](docs/requirements-audit.md) 进一步列出具体要求、六项难点、八项交付物及待验证内容。
+
+| # | 原题验收标准 | 对应说明与证据 |
+|---|---|---|
+| 1 | 多租户、节点部署、同步、多后端、IM、治理监控、恢复 | [架构概览](docs/architecture.md) 按主题分别说明方案，并链接一致性、安全及运维专题 |
+| 2 | tenant、agent、binding、session、event、memory、summary、audit 关系 | [数据模型](docs/data-model.md) 统一说明实体与实际存储。[领域模型](trpc_service/tenant/models.py) 和 [DDL](migrations/0001_production.sql) 提供实现依据，App/Binding 存于 revision JSON |
+| 3 | 至少两类 IM，含微信或企业微信，解释差异 | [企业微信与飞书对比](docs/im-channels.md#4-企业微信与飞书的差异) 覆盖认证、身份、回复、长连接、媒体及失败处理 |
+| 4 | 至少三类后端的存储与同步 | [一致性与迁移](docs/consistency.md) 说明 PostgreSQL、Redis、pgvector、S3 的职责、取舍及恢复方式 |
+| 5 | 完整消息时序及 trace/request ID 贯穿 | [企业微信时序与 trace 关联](docs/architecture.md#9-完整消息时序与-trace-关联) 提供完整路径，[回归测试](tests/test_telemetry.py) 验证队列及执行链路的 trace ID |
+| 6 | 至少 8 个风险及缓解措施 | [16 项风险清单](docs/risks.md)，措施中的生产操作仍需部署及演练 |
+| 7 | 框架复用与新增平台模块边界 | [框架复用与后续扩展](docs/architecture.md#11-框架复用与后续扩展) 区分直接复用、平台自建、替代实现与新增能力 |
+
+本地验证命令为 `uv run pytest -q`、`uv run ruff check trpc_service tests` 和 `uv run python -m compileall -q trpc_service tests`。真实 IM/模型凭据、SQL RLS、多节点恢复及容量 SLO 必须按 [生产上线门禁](docs/production-runbook.md) 在目标环境验收。当前迁移协调器不负责自动搬迁，灰度发布由运维控制。
 
 - 架构、拓扑、时序和复用边界：[docs/architecture.md](docs/architecture.md)
 - 数据模型：[docs/data-model.md](docs/data-model.md)
 - 一致性、同步、幂等和迁移：[docs/consistency.md](docs/consistency.md)
-- 企业微信/Telegram 接入：[docs/im-channels.md](docs/im-channels.md)
+- 企业微信与飞书接入及差异：[docs/im-channels.md](docs/im-channels.md)
 - 飞书机器人接入与使用：[docs/feishu-setup.md](docs/feishu-setup.md)
 - 治理、监控、OTel 和安全：[docs/security.md](docs/security.md)
 - 故障、容量、灰度和部署：[docs/operations.md](docs/operations.md)
@@ -60,18 +64,9 @@ TRPC_SERVICE_IM_DRY_RUN=false
 - 完整实现进展与剩余环境验收：[docs/progress-report.md](docs/progress-report.md)
 - 生产角色、配置、死信恢复和上线步骤：[docs/production-runbook.md](docs/production-runbook.md)
 
-## 4. 四周计划摘要
+完整验收口径见 [实施计划](docs/implementation-plan.md)。InMemory 队列和存储仅用于单进程演示。生产启动要求 PostgreSQL/Redis、强 Session HMAC key、真实模型凭据、独立迁移和非 dry-run IM 发送。
 
-| 周期 | 里程碑 | 状态 |
-|---|---|---|
-| 第 1 周 | 需求冻结、租户/Agent/Binding/Session/Event/Memory/Summary/Audit 模型、revision 与隔离 key | 已完成 |
-| 第 2 周 | 无状态 Worker、幂等队列、Session lock、Memory、Filter、审计、脱敏、trace/metrics | 已完成 |
-| 第 3 周 | 企业微信/Telegram Adapter、签名校验、Session ID、分段、FastAPI webhook/health/admin、demo | 已完成 |
-| 第 4 周 | Redis Streams + PostgreSQL outbox/SQL Session、真实模型/IM、向量/对象存储、OTel/Prometheus、部署与恢复 | 代码完成；真实凭据、集群故障演练和压测待执行 |
-
-完整验收口径见 [docs/implementation-plan.md](docs/implementation-plan.md)。InMemory 队列和存储仅用于单进程演示；生产启动会强制 PostgreSQL/Redis、强 Session HMAC key、真实模型凭据、独立迁移和非 dry-run IM 发送。
-
-## 5. 目录结构（与题目 README 一致）
+## 4. 目录结构
 
 ```text
 |-- README.md
@@ -83,7 +78,7 @@ TRPC_SERVICE_IM_DRY_RUN=false
 `-- trpc_service
     |-- _cli.py
     |-- agent       # Runner 适配与无状态 Worker
-    |-- channels    # 企业微信、Telegram、飞书 Adapter 和分段/派送
+    |-- channels    # 企业微信与飞书接入、消息分段及投递
     |-- config      # 环境设置与 SecretRef
     |-- log         # 日志与敏感信息脱敏
     |-- metrics     # trace context 和低基数指标

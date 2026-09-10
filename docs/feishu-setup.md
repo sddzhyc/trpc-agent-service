@@ -1,6 +1,8 @@
 # 飞书机器人接入与使用
 
-当前飞书通道支持 HTTP Webhook 和飞书官方 SDK 长连接两种接收模式。Webhook 支持 URL challenge、Verification Token、Encrypt Key 回调签名和 AES-256-CBC 解密；两种模式都支持 `im.message.receive_v1` 文本事件、机器人自消息过滤、单聊/群聊 Session、事件幂等、App Secret 换取并缓存 `tenant_access_token`，以及调用飞书 Open API 回复原消息。
+当前飞书通道支持 HTTP Webhook 和飞书官方 SDK 长连接两种接收模式。Webhook 负责 URL challenge、Verification Token 校验，以及配置 Encrypt Key 后的回调验签和 AES-256-CBC 解密。两种模式均将 `im.message.receive_v1` 事件转换为平台消息，过滤机器人自身消息，并按单聊或群聊确定 Session。
+
+回复通过飞书 Open API 发送，所需的 `tenant_access_token` 由 App Secret 换取并缓存。两种接收模式的确认时机不同，长连接的本地缓冲窗口及与企业微信的差异见 [IM 接入方案](im-channels.md)。
 
 ## 1. 飞书开放平台配置
 
@@ -30,13 +32,13 @@ uv sync
 python -m pip install -e .
 ```
 
-`cryptography` 用于飞书加密回调解密；`fastapi/uvicorn` 用于 webhook 服务；`trpc-agent-py` 用于真实 Agent 对话。
+依赖中，`cryptography` 负责加密回调解密，`fastapi/uvicorn` 提供 Webhook 服务，`trpc-agent-py` 承担 Agent 对话执行。
 
 `lark-oapi` 是飞书官方 Python SDK，用于长连接鉴权、加密传输、事件派发和自动重连。
 
 ## 3. 配置飞书凭据
 
-服务启动时会自动读取当前工作目录下的 `.env`。项目根目录已经提供本地 `.env`，填写以下配置即可：
+服务启动时会自动读取当前工作目录下的 `.env`。本地配置字段见 `.env.example`，飞书 Webhook 需要以下配置：
 
 ```dotenv
 TRPC_SERVICE_FEISHU_TENANT_ID=acme
@@ -61,9 +63,9 @@ TRPC_SERVICE_FEISHU_APP_SECRET_REF=env://FEISHU_APP_SECRET
 FEISHU_APP_SECRET=开放平台中的 App Secret
 ```
 
-长连接由服务启动时自动建立，仅需 App ID 和 App Secret；不需要 `Verification Token`、`Encrypt Key` 或公网回调 URL。SDK 收到事件后会先写入本地有界缓冲区并立即确认，主事件循环再完成解析和 Agent 入队，因此模型响应时间不会占用飞书要求的 3 秒回调窗口。缓冲区容量与 `TRPC_SERVICE_MAX_QUEUE_SIZE` 一致。
+长连接在服务启动时自动建立，身份认证仅需 App ID 和 App Secret，不需要 `Verification Token`、`Encrypt Key` 或公网回调 URL。SDK 收到事件后先写入本地有界缓冲区并确认，主事件循环再完成解析和 Agent 入队，模型执行不占用 SDK 回调处理时间。缓冲区容量与 `TRPC_SERVICE_MAX_QUEUE_SIZE` 一致。事件确认后、Inbox 持久化前存在进程内窗口，此时进程退出可能造成消息丢失。
 
-`TRPC_SERVICE_FEISHU_CONNECTION_MODE` 可选值为：`webhook`（默认）、`websocket` 或 `both`。`both` 会同时启用两种接收入口，此时仍需配置 Webhook 的 Verification Token 和 Encrypt Key。长连接是集群消费而非广播，同一应用虽然最多可建立 50 条连接，但生产部署应按消费并发需求控制连接数量；本项目当前建议单进程单连接。
+`TRPC_SERVICE_FEISHU_CONNECTION_MODE` 可选值为 `webhook`（默认）、`websocket` 或 `both`。`both` 同时启用两种接收入口，需要额外配置 Webhook 的 Verification Token，并按回调加密设置配置 Encrypt Key。本项目当前建议单进程单连接，生产扩容前应验证事件分配、重复消费和进程重启行为。
 
 如果使用国际版 Lark，可以覆盖 Open API 地址：
 
@@ -71,7 +73,7 @@ FEISHU_APP_SECRET=开放平台中的 App Secret
 TRPC_SERVICE_FEISHU_API_BASE_URL=https://open.larksuite.com
 ```
 
-`.env` 已被 Git 忽略，不会提交凭据；`.env.example` 只保留字段模板。终端中显式设置的同名环境变量优先级高于 `.env`。如需使用其他文件，可在终端设置 `TRPC_SERVICE_ENV_FILE` 为对应路径。生产环境仍应使用 Kubernetes Secret、Vault 或 KMS 注入，不应依赖仓库目录中的明文凭据文件。
+`.env` 已列入 Git 忽略规则，`.env.example` 只保留字段模板。提交前仍需检查暂存区，避免凭据被强制加入版本库。终端中显式设置的同名环境变量优先级高于 `.env`。如需使用其他文件，可设置 `TRPC_SERVICE_ENV_FILE` 为对应路径。生产环境应使用 Kubernetes Secret、Vault 或 KMS 注入，不应依赖仓库目录中的明文凭据文件。
 
 ## 4. 配置真实 tRPC-Agent 对话
 
@@ -83,7 +85,7 @@ TRPC_AGENT_API_KEY=模型 API Key
 TRPC_AGENT_BASE_URL=OpenAI 兼容 API 地址
 ```
 
-服务启动时会创建 `LlmAgent + Runner + InMemorySessionService`，飞书消息将转换为 tRPC-Agent `Content/Part` 并通过 `Runner.run_async` 执行。当前多节点生产环境仍应把 Session 后端替换为 Redis 或 SQL。
+服务启动时创建 `LlmAgent + Runner`，飞书消息转换为 tRPC-Agent `Content/Part`，通过 `Runner.run_async` 执行。本地默认使用 `InMemorySessionService`，当前生产路径使用共享 `RedisSessionService`。平台自身的 Session 可以选择 PostgreSQL 或 Redis，但这不等于 Runner 已接入框架 SQL SessionService。两层状态的部署与恢复关系见 [节点部署](architecture.md#4-节点部署与水平扩展)。
 
 ## 5. 启动与验证
 
@@ -102,7 +104,7 @@ Invoke-RestMethod http://127.0.0.1:8080/health/ready
 
 SDK 日志级别默认是 `WARNING`，避免 INFO 日志记录包含临时连接票据的 WebSocket URL。排障时可临时设置 `TRPC_SERVICE_FEISHU_LOG_LEVEL=INFO`，完成后应恢复并妥善处理调试日志。
 
-把公网 HTTPS 地址填入飞书事件订阅后，飞书会发送 URL verification；服务校验 token/签名并返回：
+使用 Webhook 时，把公网 HTTPS 地址填入飞书事件订阅后，飞书会发送 URL verification。服务完成相应校验后返回：
 
 ```json
 {"challenge":"飞书提供的 challenge"}
@@ -115,7 +117,7 @@ POST /open-apis/auth/v3/tenant_access_token/internal
 POST /open-apis/im/v1/messages/{message_id}/reply
 ```
 
-`tenant_access_token` 会按 App ID 和 SecretRef 缓存，并在过期前刷新；token 失效时会清除缓存并重试一次。429、5xx 和飞书可重试错误码采用有限指数退避；回复 body 带稳定 `uuid`，用于减少重复回复风险。
+`tenant_access_token` 按 App ID 和 SecretRef 缓存，并在过期前刷新。token 失效时清除缓存并重试一次。对于 429、5xx 和飞书可重试错误码，发送端采用有限指数退避。回复 body 携带稳定 `uuid`，用于减少重复回复风险，但不能据此承诺外部投递严格不重复。
 
 ## 6. 消息映射
 
@@ -130,8 +132,10 @@ POST /open-apis/im/v1/messages/{message_id}/reply
 | 其他 `chat_type` | 群聊 Session |
 | `event.message.content.text` | Agent 用户输入 |
 
-Session ID 由服务端 HMAC 生成，包含 tenant、feishu 和 chat 范围；外部用户不能通过伪造 ID 访问其他租户。
+Session ID 由服务端 HMAC 生成，输入包含租户、飞书通道和聊天范围。跨租户访问还受到 binding 校验和存储作用域约束，不仅依赖 ID 的不可预测性。
 
 ## 7. 当前边界
 
-当前实现已覆盖文本、图片、文件、富文本卡片、消息撤回、主动推送、资源上传下载和官方 SDK 长连接。开发默认使用 InMemory；多副本生产部署设置 `TRPC_SERVICE_BACKEND=postgres-redis`，由 PostgreSQL 保存 Inbox/Outbox、Session/Event/Memory/Audit，Redis Streams 提供 consumer group、pending reclaim 和 DLQ。
+飞书 Adapter 提供文本、图片、文件、卡片、撤回、主动推送和资源上传下载接口，并支持官方 SDK 长连接。通用 Runner 回复链路目前输出最终文本，不会自动把所有 Agent 事件转换为卡片，也没有实现逐 token 推送。
+
+开发默认使用 InMemory。多副本生产部署设置 `TRPC_SERVICE_BACKEND=postgres-redis`，由 PostgreSQL 保存 Inbox/Outbox 和审计，Redis Streams 提供消费组、pending 接管和 DLQ。平台 Session/Event/Memory 按租户配置选择 PostgreSQL 或 Redis，框架 Runner 上下文使用共享 Redis。

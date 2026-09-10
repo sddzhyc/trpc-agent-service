@@ -10,7 +10,7 @@
 | 6 | 非幂等工具重复产生外部副作用 | 稳定幂等 key；未知结果停止自动重试并人工对账 |
 | 7 | Worker 脑裂提交旧结果 | lease epoch/fencing，提交前校验 owner/epoch |
 | 8 | 模型超时、成本失控 | timeout/fallback、并发隔离、token/费用预算和熔断 |
-| 9 | 配置灰度漂移 | immutable revision、Session 固定 revision、tenant 回滚 |
+| 9 | 配置灰度漂移 | immutable revision、入队消息固定 revision、分批租户发布和回滚；Session 级固定与自动控制器需扩展 |
 | 10 | 向量/Memory 投影落后 | source_version、lag 指标、SQL 事实回退和迁移校验 |
 | 11 | Artifact 跨租户或孤儿对象 | tenant hash 前缀、checksum、staging TTL、GC |
 | 12 | 日志、trace、错误报告泄露密钥 | SecretRef、统一递归脱敏、secret scan、最小权限 |

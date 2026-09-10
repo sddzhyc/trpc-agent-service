@@ -2,10 +2,11 @@
 
 | 文档 | 内容 |
 |---|---|
+| [requirements-audit.md](requirements-audit.md) | 原题具体要求、六项难点、交付物逐条核查及实现/设计/环境边界 |
 | [architecture.md](architecture.md) | 设计思路、拓扑、组件职责、端到端时序和复用边界 |
-| [data-model.md](data-model.md) | 核心表结构、JSON schema 和数据生命周期 |
+| [data-model.md](data-model.md) | 基于实际 DDL 的实体关系、配置存储、字段约束和生命周期 |
 | [consistency.md](consistency.md) | 多后端一致性、同步、幂等、迁移和恢复 |
-| [im-channels.md](im-channels.md) | 企业微信/Telegram Adapter、验签、Session 和平台限制 |
+| [im-channels.md](im-channels.md) | 企业微信与飞书接入、协议差异、Session 路由和可靠性边界 |
 | [feishu-setup.md](feishu-setup.md) | 飞书 App Secret、事件订阅、加密回调、真实回复和使用步骤 |
 | [security.md](security.md) | Filter 治理、指标、OTel、审计和密钥脱敏 |
 | [operations.md](operations.md) | 故障恢复、容量、灰度、回滚和部署 |

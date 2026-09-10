@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import json
+
+from ..log import redact
 
 
 def tenant_label(tenant_id: str) -> str:
@@ -10,5 +13,8 @@ def tenant_label(tenant_id: str) -> str:
 
 
 def sanitize_attributes(values: dict[str, object]) -> dict[str, object]:
-    sensitive = {"token", "secret", "password", "api_key", "authorization"}
-    return {key: ("[REDACTED]" if key.lower() in sensitive else value) for key, value in values.items()}
+    sanitized = redact(values)
+    return {
+        key: json.dumps(value, ensure_ascii=True) if isinstance(value, dict) else value
+        for key, value in sanitized.items()
+    }

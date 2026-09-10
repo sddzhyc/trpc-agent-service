@@ -1,5 +1,7 @@
 # 四周实施进展说明
 
+> 2026-09-10 复核说明：本文为阶段记录，“已完成”仅指已有代码基线，不代表全量生产功能。准确边界以 [原题逐条检查](requirements-audit.md) 为准：固定的是入队消息 revision；自动灰度、自动搬迁、完整 token 流和沙箱未集成，token/cost 为估算。下方 75 项/覆盖率为历史记录，本次验证结果见检查记录。
+
 > 更新时间：2026-09-09
 > 项目：基于 tRPC-Agent-Python 的多租户节点化 Agent 服务
 > 当前状态：四周代码和本地自动化验证已完成；真实基础设施、平台凭据、容量和故障演练待目标环境验收
@@ -9,7 +11,7 @@
 仓库已从前三周原型推进到完整生产代码基线，形成以下闭环：
 
 ```text
-企业微信 / Telegram / 飞书
+企业微信 / 飞书
   -> Gateway 验签、身份校验、去重、租户限流
   -> PostgreSQL Inbox + Outbox
   -> Redis Streams consumer group
@@ -44,7 +46,6 @@ InMemory 仍保留用于离线 demo 和单元测试。生产模式会拒绝 InMe
 ### 第 3 周：IM 接入和服务入口
 
 - 企业微信：普通/加密 XML、SHA1 验签、EncodingAESKey 解密、URL 校验、应用消息发送、媒体下载与退避。
-- Telegram：Webhook Secret、消息/媒体解析、文本/图片/文件发送、`getFile` 下载和 429/5xx 退避。
 - 飞书：HTTP Webhook、加密回调、官方 SDK 长连接、App Secret 换 token、文本/图片/文件、卡片、主动发送和撤回。
 - 所有外部消息生成 HMAC Session ID；伪造的内部 Artifact 元数据会被清除，真实媒体落入租户 S3 前缀并校验 checksum。
 - FastAPI 提供 health、metrics、webhook、Admin 配置/审计/知识库/恢复 API；飞书长连接快速确认后异步入队。
@@ -66,7 +67,7 @@ InMemory 仍保留用于离线 demo 和单元测试。生产模式会拒绝 InMe
 | 能力 | 当前实现 | 状态 |
 |---|---|---|
 | 多租户配置 | 不可变 revision、CAS、回滚、SecretRef、AuditPolicy | 已完成 |
-| Gateway | 三种 IM、验签、精确 binding、去重前重复识别、原子限流 | 已完成 |
+| Gateway | 企业微信与飞书接入、验签、binding 校验、重复识别和原子限流 | 已有代码基线 |
 | Worker | Redis 消费、reclaim/heartbeat/DLQ、Session fencing、固定 revision | 已完成 |
 | tRPC Agent | LlmAgent/Runner、租户级模型配置、Redis Session、多模态 Part、timeout/fallback | 已完成 |
 | Tool/MCP | 显式注册、allowlist、确认、执行账本、审计 | 已完成 |
@@ -89,7 +90,9 @@ uv run pytest -q
 uv build
 ```
 
-当前共 75 项测试通过，总体语句覆盖率 67%，其中 Redis 状态后端覆盖率 90%。覆盖飞书 HTTP/长连接、企业微信 AES、Telegram 媒体、重复回调与限流、跨租户隔离、并发重复通知、队列 reclaim/DLQ/有界保留、Outbox handler、RLS migration 契约、Redis Session/Memory lease 与 fencing、prepared 回复恢复和确定性投影补建、投影版本、知识集合、Artifact、租户模型 SecretRef、多模型 fallback、模型 timeout、危险工具确认、非幂等未知结果、固定配置 revision、投递恢复、Admin CAS/RBAC、审计导出策略、metrics endpoint、离线 demo 隔离和生产 fail-fast。
+本阶段历史记录为 75 项测试通过，总体语句覆盖率 67%，Redis 状态后端覆盖率 90%。后续检查记录了 82 项测试通过，详见 [逐条检查清单](requirements-audit.md)。这些数字对应各自的代码检查，不是本次文档修订重新测得的结果。
+
+测试范围包括 IM 回调与媒体、重复受理、跨租户隔离、队列恢复、Outbox、RLS 迁移契约、Redis 状态与 fencing，以及 prepared 回复恢复。其他用例覆盖版本投影、Knowledge、Artifact、模型超时与主备切换、工具确认、配置版本、Admin 权限和生产启动检查。
 
 ## 5. 仍需目标环境验收
 
@@ -98,7 +101,7 @@ uv build
 1. PostgreSQL RLS、runtime/control/migration 三账号权限和真实 migration 验证。
 2. Redis 重启、Stream 丢失、Worker SIGTERM、pending reclaim 和 fencing 故障演练。
 3. pgvector embedding 维度、MinIO/S3 checksum、对象生命周期与孤儿清理验证。
-4. 企业微信、Telegram、飞书真实应用权限、平台回执和限流联调。
+4. 企业微信与飞书的真实应用权限、平台回执和限流联调。
 5. 真实模型、FunctionTool/MCP、fallback、费用单价和 token 统计校准。
 6. callback P95 < 500 ms、IM 正常投递率 >= 99.9% 和单 Worker 容量压测。
 7. 镜像/依赖安全扫描、备份恢复、Secret 轮换和租户配置灰度回滚演练。
