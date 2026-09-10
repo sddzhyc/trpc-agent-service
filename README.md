@@ -29,6 +29,21 @@ curl -X POST http://127.0.0.1:8080/webhook/acme/telegram \
 
 企业微信支持普通/加密 XML 回调、EncodingAESKey 解密、URL 校验、应用消息发送和临时素材下载；Telegram 支持 Bot API 文本/图片/文件发送、媒体下载及 429/5xx 重试。
 
+企业微信智能机器人长连接使用 `Bot ID + Secret`，无需公网回调地址。将凭证写入 `.env`：
+
+```dotenv
+TRPC_SERVICE_WECOM_BOT_ID=你的BotID
+TRPC_SERVICE_WECOM_BOT_SECRET_REF=env://WECOM_BOT_SECRET
+WECOM_BOT_SECRET=你的Secret
+TRPC_SERVICE_WECOM_BOT_TENANT_ID=acme
+TRPC_SERVICE_IM_DRY_RUN=false
+```
+
+然后运行 `uv sync`、`uv run trpc-service serve`。通过 `GET /health/ready` 查看
+`wecom_connections` 状态。长连接不使用 `/webhook/{tenant_id}/wecom`，该接口保留给旧的 Corp 应用回调模式。
+当前 Bot 长连接要求 `TRPC_SERVICE_ROLE=all`，因为同一机器人只能保持一条有效 WebSocket，
+接收消息和发送 Agent 回复必须由同一进程完成。
+
 飞书通道支持 HTTP Webhook 和官方 SDK 长连接。长连接只需 App ID/App Secret 且无需公网域名；两种模式均通过 Open API 回复。完整配置见 [docs/feishu-setup.md](docs/feishu-setup.md)。
 
 ## 3. 设计交付物

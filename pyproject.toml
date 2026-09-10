@@ -18,6 +18,7 @@ dependencies = [
   "python-dotenv>=1.0",
   "redis>=5.0,<7",
   "trpc-agent-py>=1.1,<1.2",
+  "wecom-aibot-python-sdk>=1.0.2,<2",
   "uvicorn>=0.29",
 ]
 

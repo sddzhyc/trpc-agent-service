@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import re
 import time
 from collections.abc import Callable
 from typing import Any, Protocol
@@ -32,6 +33,47 @@ from ..tenant import (
     TenantRegistry,
 )
 from ..tool import BudgetExceeded, InMemoryBudgetLedger, TenantPolicyFilter, active_tool_turn
+
+_HIDDEN_REASONING_BLOCK = re.compile(
+    r"<(?P<tag>think|thinking|reasoning)\b[^>]*>.*?</(?P=tag)\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+_UNCLOSED_REASONING_BLOCK = re.compile(
+    r"<(?:think|thinking|reasoning)\b[^>]*>.*\Z",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _strip_hidden_reasoning(text: str) -> str:
+    """Remove provider-specific reasoning markup from user-visible output."""
+    cleaned = _HIDDEN_REASONING_BLOCK.sub("", text)
+    cleaned = _UNCLOSED_REASONING_BLOCK.sub("", cleaned)
+    return cleaned.strip()
+
+
+def _final_answer_text(event: object) -> str:
+    """Extract only user-visible answer text from a final tRPC event."""
+    is_final = getattr(event, "is_final_response", None)
+    if not callable(is_final) or not is_final():
+        return ""
+    if getattr(event, "partial", False) or not getattr(event, "visible", True):
+        return ""
+
+    content = getattr(event, "content", None)
+    parts = getattr(content, "parts", []) if content is not None else []
+    if any(
+        getattr(part, field, None) is not None
+        for part in parts or []
+        for field in ("function_call", "function_response", "executable_code", "code_execution_result")
+    ):
+        return ""
+
+    chunks = [
+        text
+        for part in parts or []
+        if not getattr(part, "thought", False) and isinstance((text := getattr(part, "text", None)), str) and text
+    ]
+    return _strip_hidden_reasoning("".join(chunks))
 
 
 class AgentExecutor(Protocol):
@@ -94,7 +136,6 @@ class TRPCAgentExecutor:
             data = await self.artifact_store.get(artifact)
             parts.append(Part.from_bytes(data=data, mime_type=artifact.content_type))
         content = Content(parts=parts)
-        latest = ""
         final = ""
         iterator = self.runner.run_async(
             user_id=self.user_id or message.external_user_id,
@@ -111,19 +152,10 @@ class TRPCAgentExecutor:
                     event = await asyncio.wait_for(iterator.__anext__(), timeout=remaining)
                 except StopAsyncIteration:
                     break
-                if not getattr(event, "content", None):
-                    continue
-                chunks: list[str] = []
-                for part in getattr(event.content, "parts", []) or []:
-                    text = getattr(part, "text", None)
-                    if text:
-                        chunks.append(text)
-                if chunks:
-                    latest = "".join(chunks)
-                    is_final = getattr(event, "is_final_response", None)
-                    if callable(is_final) and is_final():
-                        final = latest
-        return final or latest or "已完成处理。"
+                answer = _final_answer_text(event)
+                if answer:
+                    final = answer
+        return final or "已完成处理，但没有可展示的最终回复。"
 
 
 class TenantExecutorRouter:

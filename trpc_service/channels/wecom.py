@@ -44,6 +44,11 @@ class WeComAdapter(ChannelAdapter):
         self._tokens: dict[str, tuple[str, float]] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self.dry_run = dry_run
+        self._bot_replies: dict[str, tuple[Any, Mapping[str, Any]]] = {}
+
+    def register_bot_reply(self, message_id: str, client: Any, frame: Mapping[str, Any]) -> None:
+        """Associate a callback message with its long-connection reply frame."""
+        self._bot_replies[message_id] = (client, frame)
 
     def verify(self, binding: ChannelBinding, headers: dict[str, str], body: bytes) -> bool:
         signature = _header(headers, "x-wecom-signature", "msg_signature", "signature")
@@ -131,13 +136,31 @@ class WeComAdapter(ChannelAdapter):
             return {"ok": False, "code": "binding_mismatch"}
         if self.dry_run:
             return {"ok": True, "provider_message_id": f"dry-run-{message.in_reply_to}-{message.part}"}
+        bot_reply = self._bot_replies.get(message.in_reply_to)
+        if bot_reply is not None:
+            client, frame = bot_reply
+            try:
+                receipt = await client.reply_stream(
+                    frame,
+                    f"stream-{message.in_reply_to}-{message.part}",
+                    message.text,
+                    True,
+                )
+                if message.part == message.total_parts:
+                    self._bot_replies.pop(message.in_reply_to, None)
+                errcode = int(receipt.get("errcode", 0)) if isinstance(receipt, Mapping) else 0
+                return {"ok": errcode == 0, "provider_message_id": message.in_reply_to, "code": errcode}
+            except Exception as exc:  # noqa: BLE001 - delivery layer turns this into a retryable failure
+                return {"ok": False, "code": type(exc).__name__, "retryable": True}
         if not binding.corp_id or not binding.agent_id or not binding.secret_ref:
             return {"ok": False, "code": "credentials_missing"}
         try:
             token = await self._access_token(binding)
         except (RuntimeError, ValueError, FeishuError, OSError) as exc:
             return {"ok": False, "code": type(exc).__name__, "retryable": True}
-        url = f"{binding.api_base_url or self.api_base_url}/cgi-bin/message/send?access_token={urllib.parse.quote(token)}"
+        url = (
+            f"{binding.api_base_url or self.api_base_url}/cgi-bin/message/send?access_token={urllib.parse.quote(token)}"
+        )
         content_key = "media_id" if message.message_type != "text" else "content"
         content_value = message.media_id if content_key == "media_id" else message.text
         payload = {

@@ -20,6 +20,7 @@ from ..channels import (
     FeishuVerificationError,
     TelegramAdapter,
     WeComAdapter,
+    WeComLongConnection,
     WeComVerificationError,
     make_session_id,
 )
@@ -63,6 +64,7 @@ class ServiceRuntime:
         registry: TenantRegistry,
         service: AgentService,
         feishu_connections: list[FeishuLongConnection] | None = None,
+        wecom_connections: list[WeComLongConnection] | None = None,
         repository: PostgresRepository | None = None,
         outbox_dispatcher: OutboxDispatcher | None = None,
         storage_router: StorageRouter | None = None,
@@ -72,6 +74,7 @@ class ServiceRuntime:
         self.registry = registry
         self.service = service
         self.feishu_connections = feishu_connections or []
+        self.wecom_connections = wecom_connections or []
         self.repository = repository
         self.outbox_dispatcher = outbox_dispatcher
         self.storage_router = storage_router
@@ -82,6 +85,7 @@ class ServiceRuntime:
             "status": "ok",
             "queue_depth": self.service.queue.qsize(),
             "feishu_connections": [connection.status for connection in self.feishu_connections],
+            "wecom_connections": [connection.status for connection in self.wecom_connections],
         }
         if self.repository is not None:
             try:
@@ -190,6 +194,41 @@ class ServiceRuntime:
             return {"accepted": True, "ignored": True}
         return await self._enqueue(config, callback.message)
 
+    async def ingest_wecom_long_connection(
+        self, tenant_id: str, frame: Mapping[str, Any], connection: WeComLongConnection
+    ) -> bool | dict[str, Any]:
+        if frame.get("cmd") != "aibot_msg_callback":
+            return {"accepted": True, "ignored": True}
+        body = frame.get("body")
+        if not isinstance(body, Mapping):
+            return {"accepted": True, "ignored": True}
+        config = await self.active_config(tenant_id)
+        binding = config.channels.get("wecom")
+        adapter = self.service.dispatcher.adapters.get("wecom")
+        if binding is None or not binding.enabled or not isinstance(adapter, WeComAdapter):
+            raise KeyError(f"binding {tenant_id}/wecom")
+        bot_id = str(body.get("aibotid") or body.get("bot_id") or "")
+        if bot_id and bot_id != binding.account_id:
+            raise PermissionError("WeCom bot id does not match tenant binding")
+        msg_id = str(body.get("msgid") or "")
+        if not msg_id:
+            return {"accepted": True, "ignored": True}
+        sender = body.get("from") if isinstance(body.get("from"), Mapping) else {}
+        text_body = body.get("text") if isinstance(body.get("text"), Mapping) else {}
+        payload = {
+            "MsgId": msg_id,
+            "FromUserName": str(sender.get("userid") or ""),
+            "ChatId": str(body.get("chatid") or sender.get("userid") or ""),
+            "chat_type": "group" if body.get("chattype") == "group" else "direct",
+            "Content": str(text_body.get("content") or ""),
+            "MsgType": str(body.get("msgtype") or "text"),
+            "aibotid": bot_id,
+        }
+        adapter.register_bot_reply(msg_id, connection.client, frame)
+        message = adapter.parse(tenant_id, binding, payload, new_trace_id())
+        message = replace(message, raw={**message.raw, "reply_context": {"wecom_bot": True}})
+        return await self._enqueue(config, message)
+
     async def _enqueue(self, config: TenantConfig, message: Any) -> bool:
         if not message.external_message_id or not message.external_user_id or not message.chat_id:
             raise ValueError("channel message identity is incomplete")
@@ -277,6 +316,7 @@ def build_demo_runtime(settings: ServiceSettings | None = None, *, local_demo: b
                 "TRPC_SERVICE_TELEGRAM_BOT_TOKEN_REF",
                 "TRPC_SERVICE_WECOM_SECRET_REF",
                 "TRPC_SERVICE_WECOM_ENCODING_AES_KEY_REF",
+                "TRPC_SERVICE_WECOM_BOT_SECRET_REF",
             )
         }
         invalid_ref = next(
@@ -325,17 +365,13 @@ def build_demo_runtime(settings: ServiceSettings | None = None, *, local_demo: b
     configs = demo_configs if settings.environment != "production" else []
     receives_callbacks = settings.role in {"all", "gateway"}
     feishu_mode = (
-        "webhook"
-        if local_demo
-        else os.getenv("TRPC_SERVICE_FEISHU_CONNECTION_MODE", "webhook").strip().lower()
+        "webhook" if local_demo else os.getenv("TRPC_SERVICE_FEISHU_CONNECTION_MODE", "webhook").strip().lower()
     )
     if feishu_mode not in {"webhook", "websocket", "both"}:
         raise ValueError("TRPC_SERVICE_FEISHU_CONNECTION_MODE must be webhook, websocket, or both")
     feishu_app_id = None if local_demo else os.getenv("TRPC_SERVICE_FEISHU_APP_ID")
     feishu_app_secret_ref = None if local_demo else os.getenv("TRPC_SERVICE_FEISHU_APP_SECRET_REF")
-    feishu_verification_token_ref = (
-        None if local_demo else os.getenv("TRPC_SERVICE_FEISHU_VERIFICATION_TOKEN_REF")
-    )
+    feishu_verification_token_ref = None if local_demo else os.getenv("TRPC_SERVICE_FEISHU_VERIFICATION_TOKEN_REF")
     if receives_callbacks and feishu_mode in {"websocket", "both"} and not feishu_app_id:
         raise ValueError("TRPC_SERVICE_FEISHU_APP_ID is required in websocket mode")
     if receives_callbacks and feishu_app_id:
@@ -463,12 +499,8 @@ def build_demo_runtime(settings: ServiceSettings | None = None, *, local_demo: b
         )
     elif settings.backend == "postgres-redis":
         if not settings.database_url or not settings.redis_url:
-            raise ValueError(
-                "gateway and worker roles require TRPC_SERVICE_DATABASE_URL and TRPC_SERVICE_REDIS_URL"
-            )
-        repository = PostgresRepository.from_dsn(
-            settings.database_url, control_dsn=settings.control_database_url
-        )
+            raise ValueError("gateway and worker roles require TRPC_SERVICE_DATABASE_URL and TRPC_SERVICE_REDIS_URL")
+        repository = PostgresRepository.from_dsn(settings.database_url, control_dsn=settings.control_database_url)
         queue = RedisStreamQueue(
             settings.redis_url,
             reclaim_after_ms=settings.queue_reclaim_ms,
@@ -586,6 +618,41 @@ def build_demo_runtime(settings: ServiceSettings | None = None, *, local_demo: b
         storage_router=storage_router,
         rate_limiter=rate_limiter,
     )
+    wecom_bot_id = None if local_demo else os.getenv("TRPC_SERVICE_WECOM_BOT_ID", "").strip() or None
+    wecom_bot_secret_ref = None if local_demo else os.getenv("TRPC_SERVICE_WECOM_BOT_SECRET_REF")
+    wecom_bot_tenant_id = os.getenv("TRPC_SERVICE_WECOM_BOT_TENANT_ID", "acme")
+    if receives_callbacks and wecom_bot_id:
+        if settings.role != "all":
+            raise ValueError(
+                "WeCom BotID/Secret mode currently requires TRPC_SERVICE_ROLE=all so the same process can receive and reply"
+            )
+        if not wecom_bot_secret_ref:
+            raise ValueError("TRPC_SERVICE_WECOM_BOT_SECRET_REF is required with TRPC_SERVICE_WECOM_BOT_ID")
+        tenant = next((config for config in configs if config.tenant_id == wecom_bot_tenant_id), None)
+        if tenant is not None:
+            tenant.channels["wecom"] = replace(
+                tenant.channels["wecom"],
+                account_id=wecom_bot_id,
+                secret_ref=wecom_bot_secret_ref,
+                verify_token=None,
+            )
+    wecom_connections: list[WeComLongConnection] = []
+    if receives_callbacks and wecom_bot_id:
+        bot_secret = resolve_secret(wecom_bot_secret_ref)
+        if not bot_secret:
+            raise ValueError("WeCom bot Secret is empty")
+        wecom_connections.append(
+            WeComLongConnection(
+                wecom_bot_id,
+                bot_secret,
+                wecom_bot_tenant_id,
+                runtime.ingest_wecom_long_connection,
+                ws_url=os.getenv("TRPC_SERVICE_WECOM_BOT_WS_URL", "wss://openws.work.weixin.qq.com"),
+            )
+        )
+    runtime.wecom_connections = wecom_connections
+    if wecom_connections:
+        adapters["wecom"].dry_run = False
     if receives_callbacks and feishu_app_id and feishu_mode in {"websocket", "both"}:
         app_secret = resolve_secret(feishu_app_secret_ref)
         if not app_secret:
@@ -640,13 +707,21 @@ def create_app(runtime: ServiceRuntime | None = None) -> Any:
         if runtime.settings.role in {"all", "gateway"}:
             for connection in runtime.feishu_connections:
                 connection.start(loop)
+        wecom_tasks = []
+        if runtime.settings.role in {"all", "gateway"}:
+            wecom_tasks = [
+                asyncio.create_task(connection.run(), name=f"wecom-ws-{connection.tenant_id}")
+                for connection in runtime.wecom_connections
+            ]
         try:
             yield
         finally:
             for connection in runtime.feishu_connections:
                 await asyncio.to_thread(connection.stop)
+            for connection in runtime.wecom_connections:
+                await connection.stop()
             stop.set()
-            await asyncio.gather(*workers, *background, return_exceptions=True)
+            await asyncio.gather(*workers, *background, *wecom_tasks, return_exceptions=True)
             await runtime.close()
 
     app = FastAPI(

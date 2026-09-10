@@ -111,6 +111,8 @@ class OutboundMessage:
     trace_id: str
     part: int = 1
     total_parts: int = 1
+    # Process-local reply metadata; never persisted as a credential.
+    reply_context: dict[str, Any] = field(default_factory=dict)
     message_type: str = "text"
     media_url: str | None = None
     media_id: str | None = None

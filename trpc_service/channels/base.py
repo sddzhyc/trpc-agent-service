@@ -62,6 +62,7 @@ class ChannelAdapter(ABC):
                 trace_id=message.trace_id,
                 part=index,
                 total_parts=len(parts),
+                reply_context=dict(message.raw.get("reply_context") or {}),
             )
             for index, part in enumerate(parts, 1)
         ]

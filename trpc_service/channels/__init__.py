@@ -4,6 +4,7 @@ from .feishu import FeishuAdapter, FeishuCallback, FeishuError, FeishuVerificati
 from .feishu_ws import FeishuLongConnection
 from .telegram import TelegramAdapter
 from .wecom import WeComAdapter, WeComVerificationError
+from .wecom_ws import WeComLongConnection
 
 __all__ = [
     "ChannelAdapter",
@@ -16,6 +17,7 @@ __all__ = [
     "TelegramAdapter",
     "WeComAdapter",
     "WeComVerificationError",
+    "WeComLongConnection",
     "make_session_id",
     "split_text",
 ]
