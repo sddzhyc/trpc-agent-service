@@ -16,7 +16,7 @@ Admin 凭据分别使用 `TRPC_SERVICE_ADMIN_TOKEN_REF`、`TRPC_SERVICE_ADMIN_OP
 ## 2. 初始化与部署
 
 ```bash
-uv sync --frozen
+bash build.sh
 uv run trpc-service migrate
 docker compose up --build --scale worker=2
 kubectl apply -k deploy/kustomize/base

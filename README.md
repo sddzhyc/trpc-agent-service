@@ -9,11 +9,11 @@
 
 ## 2. 快速运行
 
-运行环境为 Python 3.10+，主要依赖包括 `fastapi`、`uvicorn`、`cryptography` 和 `trpc-agent-py`。使用 `uv sync` 安装完整环境后，可以运行离线演示或启动服务。
+运行环境为 Python 3.10+，主要依赖包括 `fastapi`、`uvicorn`、`cryptography` 和 `trpc-agent-py`。使用项目提供的 `build.sh` 准备完整环境后，可以运行离线演示或启动服务。
 
 ```bash
 uv run trpc-service demo
-python -m trpc_service._cli serve
+bash start.sh
 ```
 
 服务地址：`GET /health/live`、`GET /health/ready`、`POST /webhook/{tenant_id}/{channel}`、`GET /admin/tenants`。开发租户为 `acme`、`globex`，配置位于 `trpc_service/web/app.py`，生产环境应通过 Admin API/SQL 和 SecretRef 管理，不能使用示例 token。
@@ -30,7 +30,7 @@ TRPC_SERVICE_WECOM_BOT_TENANT_ID=acme
 TRPC_SERVICE_IM_DRY_RUN=false
 ```
 
-然后运行 `uv sync`、`uv run trpc-service serve`。通过 `GET /health/ready` 查看
+然后运行 `bash build.sh`、`bash start.sh`。通过 `GET /health/ready` 查看
 `wecom_connections` 状态。长连接不使用 `/webhook/{tenant_id}/wecom`，该接口保留给旧的 Corp 应用回调模式。
 当前 Bot 长连接要求 `TRPC_SERVICE_ROLE=all`，因为回复依赖接收进程保存的 SDK 连接与消息上下文。该模式不能直接拆分为独立 Gateway 和 Worker。
 
@@ -50,7 +50,7 @@ TRPC_SERVICE_IM_DRY_RUN=false
 | 6 | 至少 8 个风险及缓解措施 | [16 项风险清单](docs/risks.md)，措施中的生产操作仍需部署及演练 |
 | 7 | 框架复用与新增平台模块边界 | [框架复用与后续扩展](docs/architecture.md#11-框架复用与后续扩展) 区分直接复用、平台自建、替代实现与新增能力 |
 
-本地验证命令为 `uv run pytest -q`、`uv run ruff check trpc_service tests` 和 `uv run python -m compileall -q trpc_service tests`。真实 IM/模型凭据、SQL RLS、多节点恢复及容量 SLO 必须按 [生产上线门禁](docs/production-runbook.md) 在目标环境验收。当前迁移协调器不负责自动搬迁，灰度发布由运维控制。
+本地验证命令为 `bash coverage.sh`、`bash lint_flake8.sh` 和 `uv run python -m compileall -q trpc_service tests`。其中，`coverage.sh` 执行测试并统计覆盖率，`lint_flake8.sh` 执行 Ruff 静态检查。真实 IM/模型凭据、SQL RLS、多节点恢复及容量 SLO 必须按 [生产上线门禁](docs/production-runbook.md) 在目标环境验收。当前迁移协调器不负责自动搬迁，灰度发布由运维控制。
 
 - 架构、拓扑、时序和复用边界：[docs/architecture.md](docs/architecture.md)
 - 数据模型：[docs/data-model.md](docs/data-model.md)

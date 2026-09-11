@@ -65,8 +65,8 @@
 
 ## 4. 验证与剩余门禁
 
-2026-09-10 的代码检查从原有 79 项测试开始，新增 tracing 和脱敏回归测试。该轮执行了 `uv run pytest -q`、`uv run ruff check trpc_service tests` 和 `uv run python -m compileall -q trpc_service tests`。这些验证不访问真实 IM、模型、SQL 或 Redis，不替代集成测试。
+2026-09-11 的代码检查通过 `coverage.sh` 执行测试与覆盖率统计，通过 `lint_flake8.sh` 执行 Ruff 检查，并执行 `uv run python -m compileall -q trpc_service tests`。这些验证不访问真实 IM、模型、SQL 或 Redis，不替代集成测试。
 
-该轮结果为 82 项测试通过，出现 2 条第三方依赖弃用警告。Ruff、compileall 和 `git diff --check` 均通过，未重新统计覆盖率。本次文档修订不重复执行运行时测试，上述数字保留为历史验证记录。
+该轮结果为 82 项测试通过，总体语句覆盖率为 67%，出现 2 条第三方依赖弃用警告。Ruff、compileall 和 `git diff --check` 均通过。上述结果对应本地代码检查，不代表真实 IM、模型、SQL、Redis 或多节点生产环境已经完成验收。
 
 进入生产必须完成 [生产运行手册第 6 节](production-runbook.md) 的 RLS/三账号、重放、Worker 故障、Redis 丢通知、ambiguous、灰度回滚及容量测试，同时校准模型 token/cost、验证密钥轮换、备份恢复与日志扫描。未获得证据前，结论为“原题设计交付可验收，核心代码本地可验证，生产运行能力有明确边界”，不得写作“全量生产功能全部完成”。

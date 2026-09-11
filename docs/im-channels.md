@@ -43,7 +43,7 @@ TRPC_SERVICE_WECOM_BOT_TENANT_ID=acme
 TRPC_SERVICE_IM_DRY_RUN=false
 ```
 
-运行 `uv run trpc-service serve` 后，通过 `/health/ready` 的 `wecom_connections` 检查连接状态。生产凭据应由 Secret 管理系统注入，而不是保存在版本库中。
+运行 `bash start.sh` 后，通过 `/health/ready` 的 `wecom_connections` 检查连接状态。生产凭据应由 Secret 管理系统注入，而不是保存在版本库中。
 
 当前连接收到消息后保存原始回复上下文，发送阶段通过同一进程中的 SDK 客户端回复。因此实现要求 `role=all`，不能将接收与回复直接拆到不同 Worker。Bot 入口当前主要归一化文本，没有完整复用应用模式的媒体下载路径。
 

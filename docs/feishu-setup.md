@@ -22,8 +22,8 @@
 
 推荐使用 uv：
 
-```powershell
-uv sync
+```bash
+bash build.sh
 ```
 
 也可以使用 pip：
@@ -89,8 +89,8 @@ TRPC_AGENT_BASE_URL=OpenAI 兼容 API 地址
 
 ## 5. 启动与验证
 
-```powershell
-uv run trpc-service serve
+```bash
+bash start.sh
 ```
 
 默认监听 `0.0.0.0:8080`。先检查：
